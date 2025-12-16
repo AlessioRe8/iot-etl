@@ -1,0 +1,27 @@
+version: '3.0'
+services:
+  mytb:
+    image: thingsboard/tb-postgres
+    restart: always
+    ports:
+      - "9090:9090"
+      - "1883:1883"
+      - "7070:7070"
+    environment:
+      - TB_QUEUE_TYPE=in-memory
+      - HTTP_BIND_PORT=9090
+    volumes:
+      - ~/.mytb-data:/data
+      - ~/.mytb-logs:/var/log/thingsboard
+
+# Neo4j
+  graphdb:
+    image: neo4j:latest
+    restart: always
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/password
+    volumes:
+      - ./neo4j/data:/data

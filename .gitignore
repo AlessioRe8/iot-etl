@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+venv/
+*.pyc
+
+# Docker
+docker-compose.override.yml
+neo4j/
+.mytb-data/
+.mytb-logs/
+
+# IDE
+.vscode/
+.idea/
