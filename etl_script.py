@@ -1,7 +1,6 @@
 import requests
 from neo4j import GraphDatabase
 
-# --- CONFIGURATION ---
 TB_URL = "http://localhost:9090"
 TB_USER = "tenant@thingsboard.org"
 TB_PASS = "tenant"
@@ -23,11 +22,26 @@ def get_tb_token():
 
 
 def get_tb_entities(token, entity_type):
-    """Fetch all Assets or Devices from ThingsBoard"""
+    """Fetch all Assets or Devices"""
     url = f"{TB_URL}/api/tenant/{entity_type}s?pageSize=1000&page=0"
     headers = {"X-Authorization": f"Bearer {token}"}
     res = requests.get(url, headers=headers)
     return res.json()['data']
+
+
+def get_tb_attributes(token, entity_id, entity_type):
+    """
+    Fetch dynamic attributes for an entity.
+    """
+    url = f"{TB_URL}/api/plugins/telemetry/{entity_type.upper()}/{entity_id}/values/attributes/SERVER_SCOPE"
+    headers = {"X-Authorization": f"Bearer {token}"}
+    try:
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            return {item['key']: item['value'] for item in res.json()}
+    except:
+        pass
+    return {}
 
 
 def get_tb_relations(token, entity_id, entity_type):
@@ -43,23 +57,39 @@ class GraphDB:
     def close(self):
         self.driver.close()
 
-    def clear_db(self):
-        """Wipe database clean before import"""
+    def get_all_node_ids(self, label):
+        """Get all IDs currently in the graph to check for deletions"""
         with self.driver.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
-            print("🧹 Neo4j Database cleared.")
+            result = session.run(f"MATCH (n:{label}) RETURN n.id as id")
+            return {record["id"] for record in result}
 
-    def create_node(self, entity_id, name, entity_type, label):
-        """Create a Node (Asset or Device)"""
+    def delete_node(self, entity_id):
+        """Remove a node that no longer exists in ThingsBoard"""
+        with self.driver.session() as session:
+            session.run("MATCH (n {id: $id}) DETACH DELETE n", id=entity_id)
+            print(f"🗑️ Deleted Node {entity_id} (Sync alignment)")
+
+    def upsert_node(self, entity_data, attributes, label):
+        e_id = entity_data['id']['id']
+        name = entity_data.get('name', 'Unknown')
+        e_type = entity_data.get('type', 'Unknown')
+
+        properties = {
+            "id": e_id,
+            "name": name,
+            "type": e_type,
+            "tb_label": entity_data.get('label', '')
+        }
+        properties.update(attributes)
+
         query = (
             f"MERGE (n:{label} {{id: $id}}) "
-            "SET n.name = $name, n.type = $type"
+            "SET n += $props "
         )
         with self.driver.session() as session:
-            session.run(query, id=entity_id, name=name, type=entity_type)
+            session.run(query, id=e_id, props=properties)
 
     def create_relation(self, from_id, to_id, relation_type):
-        """Create an Edge between two nodes"""
         query = (
             "MATCH (a {id: $from_id}), (b {id: $to_id}) "
             f"MERGE (a)-[:{relation_type}]->(b)"
@@ -67,46 +97,52 @@ class GraphDB:
         with self.driver.session() as session:
             session.run(query, from_id=from_id, to_id=to_id)
 
-
 def run_etl():
-    print("🚀 Starting ETL Process...")
-
+    print("🚀 Starting Smart ETL (Alignment Mode)...")
     token = get_tb_token()
     if not token: return
 
     db = GraphDB()
-    db.clear_db()
 
-    all_entities = []
+    entity_groups = [("asset", "Asset"), ("device", "Device")]
 
-    assets = get_tb_entities(token, "asset")
-    print(f"📥 Found {len(assets)} Assets. Loading to Neo4j...")
-    for a in assets:
-        db.create_node(a['id']['id'], a['name'], a['type'], "Asset")
-        all_entities.append(a)
+    all_current_tb_ids = set()
+    all_entities_data = []
 
-    devices = get_tb_entities(token, "device")
-    print(f"📥 Found {len(devices)} Devices. Loading to Neo4j...")
-    for d in devices:
-        db.create_node(d['id']['id'], d['name'], d['type'], "Device")
-        all_entities.append(d)
+    for tb_type, graph_label in entity_groups:
+        print(f"📥 Processing {graph_label}s...")
 
-    print("🔗 Syncing Relations (this may take a moment)...")
-    count = 0
-    for entity in all_entities:
+        tb_items = get_tb_entities(token, tb_type)
+
+        for item in tb_items:
+            e_id = item['id']['id']
+            all_current_tb_ids.add(e_id)
+
+            attrs = get_tb_attributes(token, e_id, tb_type)
+
+            db.upsert_node(item, attrs, graph_label)
+            all_entities_data.append(item)
+
+        graph_ids = db.get_all_node_ids(graph_label)
+
+        current_tb_type_ids = {i['id']['id'] for i in tb_items}
+        ids_to_delete = graph_ids - current_tb_type_ids
+
+        for del_id in ids_to_delete:
+            db.delete_node(del_id)
+
+    print("🔗 Syncing Relations...")
+    for entity in all_entities_data:
         e_id = entity['id']['id']
         e_type = entity['id']['entityType']
 
         relations = get_tb_relations(token, e_id, e_type)
-
         for r in relations:
             to_id = r['to']['id']
             rel_type = r['type']
-
             db.create_relation(e_id, to_id, rel_type)
-            count += 1
 
-    print(f"✅ ETL Complete! Synced {count} relationships.")
+    print("✅ Smart Sync Complete!")
     db.close()
 
 
