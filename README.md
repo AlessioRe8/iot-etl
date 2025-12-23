@@ -62,7 +62,7 @@ Launch the Streamlit dashboard with:
 ```bash
 streamlit run main.py
 ```
-or (if not working)
+or (if streamlit is not installed in PATH)
 ```bash
 python -m streamlit run .\app.py
 ```
