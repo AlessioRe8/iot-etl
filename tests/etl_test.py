@@ -58,7 +58,7 @@ def get_tb_relations(token, entity_id, entity_type):
 
 class GraphDB:
     def __init__(self):
-        self.driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
+        self.driver = GraphDatabase.driver(NEO_URI, auth=(NEO4J_USER, NEO4J_PASS))
 
     def close(self):
         self.driver.close()

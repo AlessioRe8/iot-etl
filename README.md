@@ -60,11 +60,11 @@ pip install -r requirements.txt
 ### 5. Run the Application
 Launch the Streamlit dashboard with:
 ```bash
-streamlit run main.py
+streamlit run app.py
 ```
 or (if streamlit is not installed in PATH)
 ```bash
-python -m streamlit run .\app.py
+python -m streamlit run app.py
 ```
 
 ## Usage Guide

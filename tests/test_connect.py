@@ -18,7 +18,7 @@ def get_token():
     payload = {"username": USERNAME, "password": PASSWORD}
     try:
         response = requests.post(url, json=payload)
-        response.raise_for_status() # Check for errors
+        response.raise_for_status()
         return response.json()['token']
     except Exception as e:
         print(f"Error connecting to ThingsBoard: {e}")
