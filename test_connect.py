@@ -1,9 +1,17 @@
 import requests
 
-# Configuration
-TB_URL = "http://localhost:9090" # Make sure this matches your docker port
-USERNAME = "tenant@thingsboard.org"
-PASSWORD = "tenant"
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+TB_URL = os.getenv("TB_URL")
+USERNAME = os.getenv("TB_USER")
+PASSWORD = os.getenv("TB_PASSWORD")
+if not TB_URL:
+    raise ValueError("TB_URL is not set. Please check your .env file.")
+
+print(f"Connecting to ThingsBoard at: {TB_URL}")
 
 def get_token():
     url = f"{TB_URL}/api/auth/login"

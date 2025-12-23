@@ -1,13 +1,19 @@
 import requests
 from neo4j import GraphDatabase
+import os
+from dotenv import load_dotenv
 
-TB_URL = "http://localhost:9090"
-TB_USER = "tenant@thingsboard.org"
-TB_PASS = "tenant"
+load_dotenv()
+TB_URL = os.getenv("TB_URL")
+TB_USER = os.getenv("TB_USER")
+TB_PASS = os.getenv("TB_PASSWORD")
+NEO_URI = os.getenv("NEO4J_URI")
+NEO4J_USER = os.getenv("NEO4J_USER")
+NEO4J_PASS = os.getenv("NEO4J_PASSWORD")
+if not TB_URL:
+    raise ValueError("TB_URL is not set. Please check your .env file.")
 
-NEO4J_URI = "bolt://localhost:7687"
-NEO4J_USER = "neo4j"
-NEO4J_PASS = "password"
+print(f"Connecting to ThingsBoard at: {TB_URL}")
 
 
 def get_tb_token():
