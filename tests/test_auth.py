@@ -30,13 +30,12 @@ def fetch_assets(token):
     response = requests.get(url, headers=headers)
     return response.json()['data']
 
-# Main execution
 token = get_token()
 if token:
-    print("✅ Authentication successful!")
+    print("Authentication successful!")
     assets = fetch_assets(token)
-    print(f"✅ Found {len(assets)} assets in ThingsBoard.")
+    print(f"Found {len(assets)} assets in ThingsBoard.")
     for asset in assets:
         print(f"   - Found Asset: {asset['name']} (Type: {asset['type']})")
 else:
-    print("❌ Failed to authenticate.")
+    print("Failed to authenticate.")
