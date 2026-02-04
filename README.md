@@ -96,3 +96,8 @@ The application is organized into four main views:
 
 #### Graph
 * **Interactive Topology:** A physics-enabled visualization of your entire IoT network.
+
+---
+
+#### v2
+As a latter update of the system, fetching, storing and editing devices and assets attributes has been implemented.
