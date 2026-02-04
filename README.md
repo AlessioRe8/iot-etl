@@ -101,3 +101,4 @@ The application is organized into four main views:
 
 #### v2
 As a latter update of the system, fetching, storing and editing devices and assets attributes has been implemented.
+Furthermore, fetching of the telemetry data from devices and assets is added.

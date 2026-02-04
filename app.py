@@ -128,6 +128,26 @@ class IoTManager:
 
         return all_attrs
 
+    def fetch_latest_telemetry(self, entity_id, entity_type):
+        token = self.get_token()
+        if not token: return {}
+        headers = {"X-Authorization": f"Bearer {token}"}
+
+        telemetry = {}
+        try:
+            url = f"{TB_URL}/api/plugins/telemetry/{entity_type}/{entity_id}/values/timeseries"
+            res = requests.get(url, headers=headers)
+
+            if res.status_code == 200:
+                data = res.json()
+                for key, values in data.items():
+                    if values:
+                        val = values[0]['value']
+                        telemetry[f"TELEMETRY_{key}"] = val
+        except:
+            pass
+        return telemetry
+
     def save_attributes_to_cloud(self, entity_id, entity_type, scope, key, value):
         token = self.get_token()
         if not token: return "❌ Auth Failed"
@@ -320,8 +340,23 @@ class IoTManager:
                 assets = res.json()['data']
                 with self.driver.session() as session:
                     for item in assets:
-                        query = "MERGE (n:Asset {id: $id}) SET n.name = $name, n.type = $type, n.status = 'synced'"
-                        session.run(query, id=item['id']['id'], name=item['name'], type=item['type'])
+                        attrs = self.fetch_attributes(item['id']['id'], "ASSET")
+                        telems = self.fetch_latest_telemetry(item['id']['id'], "ASSET")
+
+                        props = {
+                            "id": item['id']['id'],
+                            "name": item['name'],
+                            "type": item['type'],
+                            "status": "synced"
+                        }
+                        props.update(attrs)
+                        props.update(telems)
+
+                        query = """
+                                MERGE (n:Asset {id: $props.id}) 
+                                SET n += $props
+                                """
+                        session.run(query, props=props)
                         asset_ids.append(item['id']['id'])
                 messages.append(f"✅ {len(assets)} Assets")
         except Exception as e:
@@ -334,8 +369,24 @@ class IoTManager:
                 with self.driver.session() as session:
                     for item in devices:
                         lbl = item.get('label', 'Device')
-                        query = "MERGE (n:Device {id: $id}) SET n.name = $name, n.type = $type, n.label = $lbl, n.status = 'synced'"
-                        session.run(query, id=item['id']['id'], name=item['name'], type=item['type'], lbl=lbl)
+                        attrs = self.fetch_attributes(item['id']['id'], "DEVICE")
+                        telems = self.fetch_latest_telemetry(item['id']['id'], "DEVICE")
+
+                        props = {
+                            "id": item['id']['id'],
+                            "name": item['name'],
+                            "type": item['type'],
+                            "label": lbl,
+                            "status": "synced"
+                        }
+                        props.update(attrs)
+                        props.update(telems)
+
+                        query = """
+                                MERGE (n:Device {id: $props.id}) 
+                                SET n += $props
+                                """
+                        session.run(query, props=props)
                         device_ids.append(item['id']['id'])
                 messages.append(f"✅ {len(devices)} Devices")
         except Exception as e:
@@ -511,10 +562,14 @@ def render_attribute_editor(entity, entity_type):
     if status == 'draft':
         st.info("Sync this entity to the Cloud to manage attributes.")
         return
+
     all_attrs = manager.fetch_attributes(entity['ID'], entity_type)
+    telemetry_data = manager.fetch_latest_telemetry(entity['ID'], entity_type)
 
     server_attrs = {k.replace("SERVER_SCOPE:", ""): v for k, v in all_attrs.items() if "SERVER_SCOPE" in k}
     shared_attrs = {k.replace("SHARED_SCOPE:", ""): v for k, v in all_attrs.items() if "SHARED_SCOPE" in k}
+
+    clean_telemetry = {k.replace("TELEMETRY_", ""): v for k, v in telemetry_data.items()}
 
     uid = entity['ID']
 
@@ -540,6 +595,13 @@ def render_attribute_editor(entity, entity_type):
                 msg = manager.save_attributes_to_cloud(uid, entity_type, scope_code, new_k, new_v)
                 st.toast(msg)
                 st.rerun()
+
+    with st.expander(f"Latest Telemetry ({len(clean_telemetry)})"):
+        if clean_telemetry:
+            for k, v in clean_telemetry.items():
+                st.metric(label=k, value=v)
+        else:
+            st.caption("No telemetry recorded.")
 
     with st.expander(f"Server-side Attributes ({len(server_attrs)})"):
         render_list(server_attrs, "Server", "SERVER_SCOPE")
