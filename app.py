@@ -104,6 +104,47 @@ class IoTManager:
 
         return nodes, edges
 
+    def fetch_attributes(self, entity_id, entity_type):
+        token = self.get_token()
+        if not token: return {}
+        headers = {"X-Authorization": f"Bearer {token}"}
+
+        # We explicitly fetch SERVER and SHARED scopes
+        scopes = ["SERVER_SCOPE", "SHARED_SCOPE", "CLIENT_SCOPE"]
+
+        all_attrs = {}
+
+        for scope in scopes:
+            try:
+                url = f"{TB_URL}/api/plugins/telemetry/{entity_type}/{entity_id}/values/attributes/{scope}"
+                res = requests.get(url, headers=headers)
+                if res.status_code == 200:
+                    data = res.json()
+                    for item in data:
+                        key_name = f"{scope}:{item['key']}"
+                        all_attrs[key_name] = item['value']
+            except:
+                pass
+
+        return all_attrs
+
+    def save_attributes_to_cloud(self, entity_id, entity_type, scope, key, value):
+        token = self.get_token()
+        if not token: return "❌ Auth Failed"
+        headers = {"X-Authorization": f"Bearer {token}"}
+
+        payload = {key: value}
+
+        try:
+            url = f"{TB_URL}/api/plugins/telemetry/{entity_type}/{entity_id}/{scope}"
+            res = requests.post(url, json=payload, headers=headers)
+            if res.status_code == 200:
+                return f"✅ Saved {key} to {scope}"
+            else:
+                return f"⚠️ Error {res.status_code}: {res.text}"
+        except Exception as e:
+            return f"❌ Exception: {e}"
+
     def create_draft_asset(self, name, asset_type):
         temp_id = str(uuid.uuid4())
         with self.driver.session() as session:
@@ -238,11 +279,13 @@ class IoTManager:
 
         if not result: return "❌ Relation not found."
 
-        if result['from_status'] == 'draft' or result['to_status'] == 'draft':
+        record = result.data()
+
+        if record['from_status'] == 'draft' or record['to_status'] == 'draft':
             return "⚠️ Cannot sync relationship: One or both entities are still Drafts. Sync nodes first!"
 
-        from_type = "DEVICE" if "Device" in result['from_labels'] else "ASSET"
-        to_type = "DEVICE" if "Device" in result['to_labels'] else "ASSET"
+        from_type = "DEVICE" if "Device" in record['from_labels'] else "ASSET"
+        to_type = "DEVICE" if "Device" in record['to_labels'] else "ASSET"
 
         payload = {
             "from": {"id": result['from_id'], "entityType": from_type},
@@ -379,6 +422,38 @@ class IoTManager:
 
         return msg
 
+    def delete_attribute_from_cloud(self, entity_id, entity_type, scope, key):
+        token = self.get_token()
+        if not token: return "❌ Auth Failed"
+        headers = {"X-Authorization": f"Bearer {token}"}
+
+        try:
+            url = f"{TB_URL}/api/plugins/telemetry/{entity_type}/{entity_id}/{scope}?keys={key}"
+            res = requests.delete(url, headers=headers)
+            if res.status_code == 200:
+                return f"🗑️ Deleted {key}"
+            else:
+                return f"⚠️ Error {res.status_code}"
+        except Exception as e:
+            return f"❌ Exception: {e}"
+
+    def get_node_details_by_name(self, node_name):
+        with self.driver.session() as session:
+            result = session.run(
+                "MATCH (n {name: $name}) RETURN n.id as id, labels(n) as labels, n.type as type, n.status as status",
+                name=node_name).single()
+            if result:
+                record = result.data()
+                entity_type = "DEVICE" if "Device" in record['labels'] else "ASSET"
+                return {
+                    "ID": record['id'],
+                    "Name": node_name,
+                    "Type": record['type'],
+                    "Status": record['status'],
+                    "EntityType": entity_type
+                }
+            return None
+
 
 st.set_page_config(page_title="IoT Manager", layout="wide")
 st.title("IoT#ETL with ThingsBoard")
@@ -429,6 +504,49 @@ def confirm_delete_dialog(item_type, item_id_or_name, extra_info=None, policy="s
     if col2.button("Cancel", use_container_width=True):
         st.rerun()
 
+
+def render_attribute_editor(entity, entity_type):
+    status = entity.get('Status') or entity.get('status')
+
+    if status == 'draft':
+        st.info("Sync this entity to the Cloud to manage attributes.")
+        return
+    all_attrs = manager.fetch_attributes(entity['ID'], entity_type)
+
+    server_attrs = {k.replace("SERVER_SCOPE:", ""): v for k, v in all_attrs.items() if "SERVER_SCOPE" in k}
+    shared_attrs = {k.replace("SHARED_SCOPE:", ""): v for k, v in all_attrs.items() if "SHARED_SCOPE" in k}
+
+    uid = entity['ID']
+
+    def render_list(attributes, scope_name, scope_code):
+        if not attributes:
+            st.caption(f"No {scope_name} attributes.")
+        else:
+            for key, val in attributes.items():
+                c1, c2, c3 = st.columns([2, 2, 1])
+                c1.code(key)
+                c2.write(val)
+                if c3.button("❌", key=f"del_{scope_code}_{uid}_{key}"):
+                    msg = manager.delete_attribute_from_cloud(uid, entity_type, scope_code, key)
+                    st.toast(msg)
+                    st.rerun()
+
+        st.markdown(f"**Add/Edit Attribute:**")
+        c1, c2, c3 = st.columns([2, 2, 1])
+        new_k = c1.text_input("Key", key=f"new_k_{scope_code}_{uid}")
+        new_v = c2.text_input("Value", key=f"new_v_{scope_code}_{uid}")
+        if c3.button("Save", key=f"save_{scope_code}_{uid}"):
+            if new_k and new_v:
+                msg = manager.save_attributes_to_cloud(uid, entity_type, scope_code, new_k, new_v)
+                st.toast(msg)
+                st.rerun()
+
+    with st.expander(f"Server-side Attributes ({len(server_attrs)})"):
+        render_list(server_attrs, "Server", "SERVER_SCOPE")
+
+    with st.expander(f"Shared Attributes ({len(shared_attrs)})"):
+        render_list(shared_attrs, "Shared", "SHARED_SCOPE")
+
 # SIDEBAR
 st.sidebar.header("Configuration")
 st.sidebar.subheader("1. ETL")
@@ -466,6 +584,9 @@ if view == "Infrastructure":
             if c3.button("❌", key=f"del_a_{a['ID']}"):
                 confirm_delete_dialog("Asset", a['ID'], policy=policy_code)
 
+            render_attribute_editor(a, "ASSET")
+            st.markdown("---")
+
     with col_b:
         st.subheader("Devices")
         for d in manager.get_devices():
@@ -474,6 +595,9 @@ if view == "Infrastructure":
             c2.caption(d['Status'] or 'synced')
             if c3.button("❌", key=f"del_d_{d['ID']}"):
                 confirm_delete_dialog("Device", d['ID'], policy=policy_code)
+
+            render_attribute_editor(d, "DEVICE")
+            st.markdown("---")
 
 elif view == "Create Entities":
     c1, c2 = st.columns(2)
@@ -544,22 +668,32 @@ elif view == "Relationships":
 elif view == "Graph":
     st.subheader("Interactive Graph Visualization")
 
-    with st.expander("Legend & Info", expanded=True):
-        st.markdown("""
-        **Nodes:**
-        - 🟢 Synced Asset
-        - 🔵 Synced Device
-        - 🔘 Draft Element
+    col_graph, col_info = st.columns([7, 3])
 
-        **Edges:**
-        - ⚪ Synced Relationship
-        - 🔴 Draft Relationship
-        """)
+    with col_graph:
+        with st.expander("Legend", expanded=False):
+            st.markdown("( 🟢 Asset | 🔵 Device | 🔘 Draft )  (🔘 Edge | 🔴 Draft Edge )")
 
-    nodes, edges = manager.get_agraph_elements()
-    config = Config(width=1000, height=600, directed=True, physics=True, hierarchical=False, nodeHighlightBehavior=True,
-                    highlightColor="#F7A7A6", collapsible=False)
-    if nodes:
-        agraph(nodes=nodes, edges=edges, config=config)
-    else:
-        st.info("Graph is empty.")
+        nodes, edges = manager.get_agraph_elements()
+        config = Config(width=700, height=600, directed=True, physics=True, hierarchical=False, groups={} #collapsible=False
+                        )
+
+        selected_node_name = agraph(nodes=nodes, edges=edges, config=config)
+
+    with col_info:
+        st.subheader("Node Details")
+        if selected_node_name:
+            details = manager.get_node_details_by_name(selected_node_name)
+
+            if details:
+                st.write(f"**Selected: {details['Name']}**")
+                st.write(f"**Type:** {details['Type']}")
+                st.write(f"**Status:** {details['Status']}")
+                st.write(f"**UUID:** `{details['ID']}`")
+
+                st.markdown("---")
+                render_attribute_editor(details, details['EntityType'])
+            else:
+                st.warning("Could not fetch details.")
+        else:
+            st.caption("Click on a node to see attributes.")
