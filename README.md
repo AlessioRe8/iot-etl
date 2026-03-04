@@ -100,5 +100,6 @@ The application is organized into four main views:
 ---
 
 #### v2
-As a latter update of the system, fetching, storing and editing devices and assets attributes has been implemented.
-Furthermore, fetching of the telemetry data from devices and assets is added.
+* As a latter update of the system, fetching, storing and editing devices and assets attributes has been implemented (04/02/26).
+* Furthermore, fetching of the telemetry data from devices and assets is added (04/02/26).
+* Another addition is the download graph button in the sidebar that exports a JSON version of the graph (04/03/26).

@@ -3,6 +3,7 @@ import requests
 from neo4j import GraphDatabase
 import uuid
 from streamlit_agraph import agraph, Node, Edge, Config
+import json
 
 import os
 from dotenv import load_dotenv
@@ -488,6 +489,19 @@ class IoTManager:
         except Exception as e:
             return f"❌ Exception: {e}"
 
+    def export_graph_to_json(self):
+        with self.driver.session() as session:
+            nodes_res = session.run("MATCH (n) RETURN labels(n) as labels, properties(n) as props")
+            nodes = [{"labels": r["labels"], "properties": r["props"]} for r in nodes_res]
+
+            edges_res = session.run(
+                "MATCH (a)-[r]->(b) RETURN a.id as source_id, b.id as target_id, type(r) as type, properties(r) as props")
+            edges = [
+                {"source_id": r["source_id"], "target_id": r["target_id"], "type": r["type"], "properties": r["props"]}
+                for r in edges_res]
+
+            return {"nodes": nodes, "edges": edges}
+
     def get_node_details_by_name(self, node_name):
         with self.driver.session() as session:
             result = session.run(
@@ -632,6 +646,20 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("3. Settings")
 sync_policy = st.sidebar.radio("Deletion Policy", ("Safe Mode (Graph Only)", "Strict Mode (Graph + Cloud)"), index=0)
 policy_code = "safe" if "Safe" in sync_policy else "strict"
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("4. Export Graph")
+
+graph_data = manager.export_graph_to_json()
+json_string = json.dumps(graph_data, indent=4)
+
+st.sidebar.download_button(
+    label="Download Graph (JSON)",
+    file_name="thingsboard_graph_export.json",
+    mime="application/json",
+    data=json_string,
+    help="Export the current Neo4j topology for external use."
+)
 
 view = st.radio("Navigation", ["Infrastructure", "Create Entities", "Relationships", "Graph"], horizontal=True, label_visibility="collapsed")
 
